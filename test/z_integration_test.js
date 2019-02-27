@@ -412,21 +412,27 @@ describe('integration', () => {
 describe('failures', () => {
   let nsqdProcess = null
 
-  before(done => {
-    temp.mkdir('/nsq', (err, dirPath) => {
-      if (err) return done(err)
-
-      startNSQD(dirPath, {}, (err, process) => {
-        nsqdProcess = process
-        done(err)
-      })
-    })
-  })
-
   describe('Writer', () => {
+    let writer = null
+
+    afterEach(() => {
+      writer.close()
+    })
+
     describe('nsqd disconnect before publish', () => {
+      before(done => {
+        temp.mkdir('/nsq', (err, dirPath) => {
+          if (err) return done(err)
+
+          startNSQD(dirPath, {}, (err, process) => {
+            nsqdProcess = process
+            done(err)
+          })
+        })
+      })
+
       it('should fail to publish a message', done => {
-        const writer = new nsq.Writer('127.0.0.1', TCP_PORT)
+        writer = new nsq.Writer('127.0.0.1', TCP_PORT)
         async.series(
           [
             // Connect the writer to the nsqd.
@@ -447,6 +453,129 @@ describe('failures', () => {
               writer.publish(
                 'test_topic',
                 'a message that should fail',
+                err => {
+                  should.exist(err)
+                  callback()
+                }
+              )
+            }
+          ],
+          done
+        )
+      })
+    })
+
+    describe.only('writer reconnect to nsqd', () => {
+      before(done => {
+        temp.mkdir('/nsq', (err, dirPath) => {
+          if (err) return done(err)
+
+          startNSQD(dirPath, {}, (err, process) => {
+            nsqdProcess = process
+            done(err)
+          })
+        })
+      })
+
+      after(done => {
+        nsqdProcess.on('exit', err => {
+          done(err)
+        })
+        nsqdProcess.kill('SIGKILL')
+      })
+
+      it('should successfully reconnect and able to publish a message', function (done) {
+        this.timeout(30000)
+        writer = new nsq.Writer('127.0.0.1', TCP_PORT, { reconnectInterval: 1 })
+        async.series(
+          [
+            // Connect the writer to the nsqd.
+            callback => {
+              writer.connect()
+              writer.on('ready', callback)
+              writer.on('error', () => {}) // Ensure error message is handled.
+            },
+
+            // Stop the nsqd process.
+            callback => {
+              nsqdProcess.on('exit', callback)
+              nsqdProcess.kill('SIGKILL')
+            },
+
+            // Attempt to publish a message.
+            callback => {
+              writer.publish(
+                'test_topic',
+                'a message that should fail',
+                err => {
+                  should.exist(err)
+                  callback()
+                }
+              )
+            },
+
+            // Restart the nsqd process.
+            callback => {
+              temp.mkdir('/nsq', (err, dirPath) => {
+                if (err) return callback(err)
+
+                startNSQD(dirPath, {}, (err, process) => {
+                  nsqdProcess = process
+                  callback(err)
+                })
+              })
+            },
+
+            // Wait for auto-reconnection
+            callback => {
+              // setTimeout(callback, 2000)
+              writer.on('ready', callback)
+            },
+
+            // Attempt to publish a message.
+            callback => {
+              writer.publish(
+                'test_topic',
+                'a message that should succeed',
+                err => {
+                  should.not.exist(err)
+                  callback()
+                }
+              )
+            }
+          ],
+          done
+        )
+      })
+
+      it('should not reconnect when the connection is closed by writer.close()', function (done) {
+        this.timeout(3000)
+        writer = new nsq.Writer('127.0.0.1', TCP_PORT, { reconnectInterval: 1 })
+        async.series(
+          [
+            // Connect the writer to the nsqd.
+            callback => {
+              writer.connect()
+              writer.on('ready', callback)
+              writer.on('error', () => {}) // Ensure error message is handled.
+            },
+
+            // Close the writer connection.
+            callback => {
+              writer.on('closed', callback)
+              writer.close()
+            },
+
+            // Wait 2s for auto-reconnection
+            callback => {
+              setTimeout(callback, 2000)
+            },
+
+            // Attempt to publish a message.
+            callback => {
+              writer.publish(
+                'test_topic',
+                'a message that should succeed',
                 err => {
                   should.exist(err)
                   callback()
