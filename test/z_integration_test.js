@@ -528,8 +528,7 @@ describe('failures', () => {
 
             // Wait for auto-reconnection
             callback => {
-              // setTimeout(callback, 2000)
-              writer.on('ready', callback)
+              setTimeout(callback, 2000)
             },
 
             // Attempt to publish a message.
@@ -549,7 +548,7 @@ describe('failures', () => {
       })
 
       it('should not reconnect when the connection is closed by writer.close()', function (done) {
-        this.timeout(3000)
+        this.timeout(5000)
         writer = new nsq.Writer('127.0.0.1', TCP_PORT, { reconnectInterval: 1 })
         async.series(
           [
@@ -566,7 +565,7 @@ describe('failures', () => {
               writer.close()
             },
 
-            // Wait 2s for auto-reconnection
+            // Wait 2s.
             callback => {
               setTimeout(callback, 2000)
             },
@@ -575,7 +574,7 @@ describe('failures', () => {
             callback => {
               writer.publish(
                 'test_topic',
-                'a message that should succeed',
+                'a message that should fail',
                 err => {
                   should.exist(err)
                   callback()
